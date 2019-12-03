@@ -1,0 +1,152 @@
+TODO: get foriegn keys in.
+TODO: include other tables
+TODO: incorporate updates data
+
+See ruby program read-tables for creation routines.
+
+table name               source filename
+==========               ===============
+weight                   WEIGHT.txt
+nutrient_data            NUT_DATA.txt
+nutrient_definition      NUTR_DEF.txt
+food_group               FD_GROUP.txt
+food_description         FOOD_DES.txt
+
+table weight
+=================================================
+ id            | character(5)          | not null
+ sequence      | character(2)          | not null
+ amount        | double precision      | not null
+ description   | character varying(84) | not null
+ grams         | double precision      | not null
+ data_points   | integer               |
+ std_deviation | double precision      |
+
+table nutrient_data
+=======================================================
+ food_id              | character(5)         | not null
+ nutrient_id          | character(3)         | not null
+ nutrient_value       | double precision     | not null
+ data_points          | double precision     | not null
+ std_error            | double precision     |
+ source_code          | character varying(2) | not null
+ derivation_code      | character(4)         |
+ food_id_reference    | character(5)         |
+ added_nutrient       | character(1)         |
+ number_studies       | integer              |
+ minimum              | double precision     |
+ maximum              | double precision     |
+ degrees_freedom      | integer              |
+ lower_error_bound    | double precision     |
+ upper_error_bound    | double precision     |
+ statistical_comments | character(10)        |
+ modification_date    | character(10)        |
+ confidence_code      | character(1)         |
+
+table nutrient_definition
+==================================================
+ id             | character(3)          | not null
+ units          | character varying(7)  | not null
+ tagname        | character varying(20) |
+ description    | character varying(60) |
+ decimal_places | character(1)          |
+ sort_order     | integer               |
+
+table food_group
+===============================================
+ id          | character(5)          | not null
+ description | character varying(60) | not null
+
+table food_description
+========================================================
+ id                  | character(5)           | not null
+ food_group_id       | character(4)           | not null
+ description         | character varying(200) | not null
+ short_description   | character varying(60)  | not null
+ common_name         | character varying(100) |
+ manufacturer_name   | character varying(65)  |
+ survey_code         | character(1)           |
+ refuse_description  | character varying(135) |
+ refuse_percentage   | integer                |
+ scientific_name     | character varying(65)  |
+ nitrogen_factor     | double precision       |
+ protein_factor      | double precision       |
+ fat_factor          | double precision       |
+ carbohydrate_factor | double precision       |
+
+
+'208' is kcal/100 g
+
+SELECT food_description.description, nutrient_data.nutrient_value,
+       food_group.description AS food_group,
+       food_description.refuse_percentage, food_description.refuse_description
+  FROM food_description, nutrient_definition, nutrient_data, food_group
+ WHERE food_description.id =  nutrient_data.food_id
+   AND food_group.id =  food_description.food_group_id
+   AND nutrient_definition.id = nutrient_data.nutrient_id
+   AND nutrient_definition.id = '208'
+   AND food_description.food_group_id
+       NOT IN ('0300', '2100', '2200', '3600')
+   AND food_description.id
+       IN (SELECT id FROM food_description WHERE description ILIKE '%chicken%' AND description ILIKE '%thigh%');
+
+food groups excluded: Baby Foods; Fast Foods; Meals, Entrees and Side Dishes; Restaurant Foods
+
+
+SELECT amount, description, grams FROM WEIGHT WHERE id = '19296' ORDER BY sequence
+
+DROP VIEW IF EXISTS foods;
+
+CREATE VIEW foods AS
+SELECT food_description.id, food_description.description,
+       nutrient_data.nutrient_value AS kcal,
+       food_group.description AS food_group,
+       food_description.refuse_percentage, food_description.refuse_description
+  FROM food_description, nutrient_definition, nutrient_data, food_group
+ WHERE food_description.id =  nutrient_data.food_id
+   AND food_group.id =  food_description.food_group_id
+   AND nutrient_definition.id = nutrient_data.nutrient_id
+   AND nutrient_definition.id = '208'
+   AND food_group.id NOT IN ('0300', '2100', '2200', '3600');
+
+
+view foods
+=============================================
+ id                 | character(5)
+ description        | character varying(200)
+ kcal               | double precision
+ food_group         | character varying(60)
+ refuse_percentage  | integer
+ refuse_description | character varying(135)
+
+
+SELECT * FROM foods WHERE description ILIKE '%chicken%' AND description ILIKE '%thigh%';
+SELECT * FROM foods WHERE description ILIKE '%chickpeas%';
+
+The groups...
+
+ 0100  | Dairy and Egg Products
+ 0200  | Spices and Herbs
+ 0300  | Baby Foods
+ 0400  | Fats and Oils
+ 0500  | Poultry Products
+ 0600  | Soups, Sauces, and Gravies
+ 0700  | Sausages and Luncheon Meats
+ 0800  | Breakfast Cereals
+ 0900  | Fruits and Fruit Juices
+ 1000  | Pork Products
+ 1100  | Vegetables and Vegetable Products
+ 1200  | Nut and Seed Products
+ 1300  | Beef Products
+ 1400  | Beverages
+ 1500  | Finfish and Shellfish Products
+ 1600  | Legumes and Legume Products
+ 1700  | Lamb, Veal, and Game Products
+ 1800  | Baked Products
+ 1900  | Sweets
+ 2000  | Cereal Grains and Pasta
+ 2100  | Fast Foods
+ 2200  | Meals, Entrees, and Side Dishes
+ 2500  | Snacks
+ 3500  | American Indian/Alaska Native Foods
+ 3600  | Restaurant Foods

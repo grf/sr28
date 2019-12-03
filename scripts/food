@@ -1,0 +1,118 @@
+#!/usr/bin/env ruby
+
+require 'pg'
+require 'json'
+
+DATABASE_NAME = 'food' # the postgresql database name you've created
+
+Kernel.trap('PIPE') { exit }
+
+# TODO: adapt SQL for prepared statements
+# TODO: move to symbols in hashes
+# TODO: use leading minus to indicate "NOT ILIKE" instead of "ILKE"
+
+def search_terms(*words)
+  terms = []
+  words.each { |word| terms.push "'%#{word.gsub(/[^a-z]/i, '').strip}%'" }
+  return nil if terms.empty?
+  return 'description ILIKE ' + terms.join(' AND description ILIKE ')
+end
+
+
+def usage()
+  STDERR.puts "Usage: #{File.basename $0} search-term [ search-term *]", "       note that search terms must be alphabetic"
+  exit -1
+end
+
+
+# get_foods(db_connection) => [ record* ]
+# where a record is a hash', e.g.:
+#   "id": "16359",
+#   "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, canned, drained, rinsed in tap water",
+#   "kcal": 138,
+#   "food_group": "Legumes and Legume Products",
+#   "refuse_percentage": 0,
+#   "refuse_description": null
+
+def get_foods(connection)
+  search_clause = search_terms(*ARGV)
+  usage() unless search_clause
+  list = []
+  results = connection.exec("SELECT * FROM foods WHERE #{search_clause}")
+  results.each do |result|
+    result['kcal'] = result['kcal'].to_i
+    result['refuse_percentage'] = result['refuse_percentage'].to_i
+    result['refuse_description'] = "#{result['refuse_description']}".strip
+    list.push result
+  end
+  return list
+rescue PG::Error => e
+  STDERR.puts e
+  exit -1
+end
+
+# add_measured()
+# augment a food record with additional measurement information
+
+def add_measures(connection, food_record)
+  results = connection.exec("SELECT amount, description, grams FROM weight WHERE id = '#{food_record['id']}' ORDER BY sequence")
+  list = []
+  list.push( { 'measure' => '100 grams', 'kcals' => food_record['kcal'].to_i,  'grams' => 100 })
+  # example record: { "amount": "1", "description": "cup", "grams": "185" }
+  results.each do |rec|
+    text = [ rec['amount'].to_s, rec['description'] ].join(' ')
+    kcals = food_record['kcal'].to_f * rec['grams'].to_f / 100
+    list.push( { 'measure' => text.strip, 'kcals' => kcals.to_i, 'grams' => rec['grams'].to_i })
+  end
+  food_record['measures'] = list
+rescue PG::Error => e
+  STDERR.puts e
+  exit -1
+end
+
+
+def get_connection(database_name)
+  return PG::Connection.open(:dbname => database_name)
+rescue PG::Error => e
+  STDERR.puts e
+  exit -1
+end
+
+def summary_report(list)
+  group = ''
+
+  list.each do |rec|
+    if rec['food_group'] != group
+      group = rec['food_group']
+      puts '', group, group.gsub(/./, '*')
+    end
+
+    puts '', rec['description']
+
+    rec['measures'].each do |measure|
+      puts sprintf(" %5i kcals per %s", measure['kcals'], measure['measure'])
+    end
+
+    if rec['refuse_percentage'] > 0
+      puts sprintf("Refuse %i%% - %s", rec['refuse_percentage'], rec['refuse_description'])
+    end
+  end
+end
+
+# main()
+
+conn = get_connection(DATABASE_NAME)
+foods = get_foods(conn)
+foods.each do |record|
+  add_measures(conn, record)
+end
+
+list = foods.sort_by { |a| [ a['food_group'].downcase, a['description'].downcase ]}
+
+# For a text report:
+
+summary_report(list)
+
+# For a GET from a REST API:
+
+# puts JSON.pretty_generate(list)

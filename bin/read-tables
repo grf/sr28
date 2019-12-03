@@ -1,0 +1,314 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+
+# TODO: add foreign key definitions, add other tables.
+
+# Extract information from the USDA sr28 database files into
+# postgresql create table and insert statements.  This program reads
+# the source data files (an idiosyncratic CSV format) from a subset of
+# the sr28 USDA database text files and inserts them (slightly
+# renamed) into postgresql for latter processing. The CSV files should
+# be in the current working directory.
+#
+# Only a subset of the files are read - enough to query the database
+# for my needs - calories based on searches of the food descriptions.
+#
+# Given that you've created a database named 'food' and have changed
+# to directory with the files:
+#
+#   FD_GROUP.txt
+#   FOOD_DES.txt
+#   NUTR_DEF.txt
+#   NUT_DATA.txt
+#   WEIGHT.txt
+#
+# Then:
+#
+# read-tables | psql -d food
+#
+# It will take a while, it's a naive approach I've taken: a separate
+# insert for each datum. The db will then be set up for the other
+# programs in this project.
+#
+
+def read_data(filename)
+  count = 0
+  fd = File.open(filename)
+  while not fd.eof?
+    line = fd.readline
+    line.chomp!
+    count += 1
+    fields = []
+    line.split('^').each do |f|
+      datum = f.gsub('~~','').gsub(/^~/,'').gsub(/~$/,'')
+      fields.push(datum.empty? ? nil : datum)
+    end
+    yield fields
+  end
+rescue => e
+  STDERR.puts "error '#{e}' file '#{filename}' line #{count}"
+  exit
+ensure
+  fd.close
+end
+
+def make_insert_statement(table, fielddata, *fieldnames)
+  names = []
+  values = []
+  fielddata.each do |val|
+    name = fieldnames.shift
+    next if val.nil?
+    names.push name
+    values.push val.gsub("'", "''")   # sql quoting "'" => "''"
+  end
+  "insert into #{table}(" + names.join(', ') + ") values('" + values.join("', '") + "');"
+end
+
+# table weight
+# =================================================
+#  id            | character(5)          | not null
+#  sequence      | character(2)          | not null
+#  amount        | double precision      | not null
+#  description   | character varying(84) | not null
+#  grams         | double precision      | not null
+#  data_points   | integer               |
+#  std_deviation | double precision      |
+
+def write_weight_table()
+  puts <<SQL
+drop table if exists WEIGHT;
+drop index if exists id_idx;
+drop index if exists sequence_idx;
+
+create table WEIGHT(
+   id char(5) not null,
+   sequence char(2) not null,
+   amount float not null,
+   description varchar(84) not null,
+   grams float not null,
+   data_points int default null,
+   std_deviation float default null,
+   primary key (id, sequence)
+);
+
+create index id_idx on WEIGHT(id);
+create index sequence_idx on WEIGHT(sequence);
+
+SQL
+
+  read_data('WEIGHT.txt') do |fields|
+    puts make_insert_statement('WEIGHT', fields,
+                               'id', 'sequence', 'amount', 'description', 'grams',
+                               'data_points', 'std_deviation')
+  end
+end
+
+
+# table nutrient_data
+# =======================================================
+#  food_id              | character(5)         | not null
+#  nutrient_id          | character(3)         | not null
+#  nutrient_value       | double precision     | not null
+#  data_points          | double precision     | not null
+#  std_error            | double precision     |
+#  source_code          | character varying(2) | not null
+#  derivation_code      | character(4)         |
+#  food_id_reference    | character(5)         |
+#  added_nutrient       | character(1)         |
+#  number_studies       | integer              |
+#  minimum              | double precision     |
+#  maximum              | double precision     |
+#  degrees_freedom      | integer              |
+#  lower_error_bound    | double precision     |
+#  upper_error_bound    | double precision     |
+#  statistical_comments | character(10)        |
+#  modification_date    | character(10)        |
+#  confidence_code      | character(1)         |
+
+def write_nutrient_data_table()
+  puts <<SQL
+drop table if exists NUTRIENT_DATA;
+drop index if exists food_id_idx;
+drop index if exists nutrient_id_idx;
+
+create table NUTRIENT_DATA(
+   food_id char(5) not null,
+   nutrient_id char(3) not null,
+   nutrient_value float not null,
+   data_points float not null,
+   std_error float default null,
+   source_code varchar(2) not null,
+   derivation_code char(4) default null,
+   food_id_reference char(5) default null,
+   added_nutrient char(1) default null,
+   number_studies int default null,
+   minimum float default null,
+   maximum float default null,
+   degrees_freedom int default null,
+   lower_error_bound float default null,
+   upper_error_bound float default null,
+   statistical_comments char(10) default null,
+   modification_date char(10) default null,
+   confidence_code char(1) default null,
+   primary key (food_id, nutrient_id)
+);
+create index food_id_idx on NUTRIENT_DATA(food_id);
+create index nutrient_id_idx on NUTRIENT_DATA(nutrient_id);
+
+SQL
+
+  read_data('NUT_DATA.txt') do |fields|
+    puts make_insert_statement('NUTRIENT_DATA', fields,
+                               'food_id', 'nutrient_id', 'nutrient_value',
+                               'data_points', 'std_error', 'source_code',
+                               'derivation_code', 'food_id_reference',
+                               'added_nutrient', 'number_studies', 'minimum',
+                               'maximum', 'degrees_freedom', 'lower_error_bound',
+                               'upper_error_bound', 'statistical_comments',
+                               'modification_date', 'confidence_code')
+  end
+end
+
+# table nutrient_definition
+# ==================================================
+#  id             | character(3)          | not null
+#  units          | character varying(7)  | not null
+#  tagname        | character varying(20) |
+#  description    | character varying(60) |
+#  decimal_places | character(1)          |
+#  sort_order     | integer               |
+
+def write_nutrient_definition_table()
+  puts <<SQL
+drop table if exists NUTRIENT_DEFINITION;
+create table NUTRIENT_DEFINITION(
+   id char(3) not null,
+   units varchar(7) not null,
+   tagname varchar(20) default null,
+   description varchar(60) default null,
+   decimal_places char(1) default null,
+   sort_order int default null,
+   primary key (id)
+);
+SQL
+
+  read_data('NUTR_DEF.txt') do |fields|
+    puts make_insert_statement('NUTRIENT_DEFINITION', fields,
+                               'id', 'units', 'tagname', 'description',
+                               'decimal_places', 'sort_order')
+  end
+end
+
+# table food_group
+# ===============================================
+#  id          | character(5)          | not null
+#  description | character varying(60) | not null
+
+def write_food_group_table()
+  puts <<SQL
+drop table if exists FOOD_GROUP;
+create table FOOD_GROUP(
+   id char(5) not null,
+   description varchar(60) not null,
+   primary key(id)
+);
+SQL
+
+  read_data('FD_GROUP.txt') do |fields|
+    puts make_insert_statement('FOOD_GROUP', fields, 'id', 'description')
+  end
+end
+
+# table food_description
+# ========================================================
+#  id                  | character(5)           | not null
+#  food_group_id       | character(4)           | not null
+#  description         | character varying(200) | not null
+#  short_description   | character varying(60)  | not null
+#  common_name         | character varying(100) |
+#  manufacturer_name   | character varying(65)  |
+#  survey_code         | character(1)           |
+#  refuse_description  | character varying(135) |
+#  refuse_percentage   | integer                |
+#  scientific_name     | character varying(65)  |
+#  nitrogen_factor     | double precision       |
+#  protein_factor      | double precision       |
+#  fat_factor          | double precision       |
+#  carbohydrate_factor | double precision       |
+
+def write_food_description_table()
+  puts <<SQL
+drop table if exists FOOD_DESCRIPTION;
+create table FOOD_DESCRIPTION(
+    id char(5) not null,
+    food_group_id char(4) not null,
+    description varchar(200) not null,
+    short_description varchar(60) not null,
+    common_name varchar(100) default null,
+    manufacturer_name varchar(65) default null,
+    survey_code char(1) default null,
+    refuse_description varchar(135) default null,
+    refuse_percentage int default null,
+    scientific_name varchar(65) default null,
+    nitrogen_factor float default null,
+    protein_factor float default null,
+    fat_factor float default null,
+    carbohydrate_factor float default null,
+    primary key (id)
+);
+SQL
+
+  read_data('FOOD_DES.txt') do |fields|
+    puts make_insert_statement('FOOD_DESCRIPTION', fields,
+                               'id', 'food_group_id', 'description',
+                               'short_description', 'common_name',
+                               'manufacturer_name', 'survey_code',
+                               'refuse_description', 'refuse_percentage',
+                               'scientific_name', 'nitrogen_factor',
+                               'protein_factor', 'fat_factor',
+                               'carbohydrate_factor')
+  end
+end
+
+# view foods
+# =============================================
+#  id                 | character(5)
+#  description        | character varying(200)
+#  kcal               | double precision
+#  food_group         | character varying(60)
+#  refuse_percentage  | integer
+#  refuse_description | character varying(135)
+#
+# Note: for my needs I've excluded certain food groups in this view:
+# Baby Foods; Fast Foods; Meals, Entrees and Side Dishes; Restaurant
+# Foods. I pretty much cook from unprocessed ingredients, so this
+# works for me.
+#
+# Feel free to fork and adjust to your needs.
+
+def write_foods_view()
+    puts <<SQL
+DROP VIEW IF EXISTS foods;
+
+CREATE VIEW foods AS
+SELECT food_description.id, food_description.description,
+       nutrient_data.nutrient_value AS kcal,
+       food_group.description AS food_group,
+       food_description.refuse_percentage, food_description.refuse_description
+  FROM food_description, nutrient_definition, nutrient_data, food_group
+ WHERE food_description.id =  nutrient_data.food_id
+   AND food_group.id =  food_description.food_group_id
+   AND nutrient_definition.id = nutrient_data.nutrient_id
+   AND nutrient_definition.id = '208'
+   AND food_group.id NOT IN ('0300', '2100', '2200', '3600');
+SQL
+end
+
+# main()
+
+write_food_description_table()
+write_nutrient_data_table()
+write_weight_table()
+write_food_group_table()
+write_nutrient_definition_table()
+write_foods_view()
