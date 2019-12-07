@@ -8,7 +8,6 @@ DATABASE_NAME = 'food' # the postgresql database name you've created
 Kernel.trap('PIPE') { exit }
 
 # TODO: adapt SQL for prepared statements
-# TODO: move to symbols in hashes
 # TODO: use leading minus to indicate "NOT ILIKE" instead of "ILKE"
 
 def search_terms(*words)
@@ -18,6 +17,10 @@ def search_terms(*words)
   return 'description ILIKE ' + terms.join(' AND description ILIKE ')
 end
 
+# not yet working
+# def search_terms2(*words)
+#   terms = words.map{ |w| '(?:' + w.sub(/[^a-z]/i, '') + ')'}.join
+# end
 
 def usage()
   STDERR.puts "Usage: #{File.basename $0} search-term [ search-term *]", "       note that search terms must be alphabetic"
@@ -38,12 +41,18 @@ def get_foods(connection)
   search_clause = search_terms(*ARGV)
   usage() unless search_clause
   list = []
+
   results = connection.exec("SELECT * FROM foods WHERE #{search_clause}")
   results.each do |result|
-    result['kcal'] = result['kcal'].to_i
-    result['refuse_percentage'] = result['refuse_percentage'].to_i
-    result['refuse_description'] = "#{result['refuse_description']}".strip
-    list.push result
+    rec = {
+      id:                 result['id'],
+      kcal:               result['kcal'].to_i,
+      refuse_percentage:  result['refuse_percentage'].to_i,
+      refuse_description: "#{result['refuse_description']}".strip,
+      description:        result['description'],
+      food_group:         result['food_group']
+    }
+    list.push rec
   end
   return list
 rescue PG::Error => e
@@ -55,16 +64,19 @@ end
 # augment a food record with additional measurement information
 
 def add_measures(connection, food_record)
-  results = connection.exec("SELECT amount, description, grams FROM weight WHERE id = '#{food_record['id']}' ORDER BY sequence")
-  list = []
-  list.push( { 'measure' => '100 grams', 'kcals' => food_record['kcal'].to_i,  'grams' => 100 })
+  results = connection.exec_prepared('measure_select', [ food_record[:id] ])
+
+  kcals_per_100_grams = food_record[:kcal].to_f
+  list = [ { measure: '100 grams', kcals: kcals_per_100_grams.round,  grams: 100 } ]
+
   # example record: { "amount": "1", "description": "cup", "grams": "185" }
-  results.each do |rec|
-    text = [ rec['amount'].to_s, rec['description'] ].join(' ')
-    kcals = food_record['kcal'].to_f * rec['grams'].to_f / 100
-    list.push( { 'measure' => text.strip, 'kcals' => kcals.to_i, 'grams' => rec['grams'].to_i })
+  results.each do |result|
+    amount, description, grams = result.fetch_values('amount', 'description', 'grams')
+    text = "#{amount} #{description}".strip
+    total_kcals = kcals_per_100_grams * grams.to_f / 100
+    list.push( { measure: text.strip, kcals: total_kcals.round, grams: grams.to_f.round })
   end
-  food_record['measures'] = list
+  food_record[:measures] = list
 rescue PG::Error => e
   STDERR.puts e
   exit -1
@@ -72,7 +84,10 @@ end
 
 
 def get_connection(database_name)
-  return PG::Connection.open(:dbname => database_name)
+  connection = PG::Connection.open(:dbname => database_name)
+  connection.prepare('measure_select', 'SELECT amount, description, grams FROM weight WHERE id = $1 ORDER BY sequence')
+  ## not yet working: connection.prepare('regexp_food_select', 'SELECT * FROM foods WHERE description ~* $1')
+  return connection
 rescue PG::Error => e
   STDERR.puts e
   exit -1
@@ -82,19 +97,19 @@ def summary_report(list)
   group = ''
 
   list.each do |rec|
-    if rec['food_group'] != group
-      group = rec['food_group']
+    if rec[:food_group] != group
+      group = rec[:food_group]
       puts '', group, group.gsub(/./, '*')
     end
 
-    puts '', rec['description']
+    puts '', rec[:description]
 
-    rec['measures'].each do |measure|
-      puts sprintf(" %5i kcals per %s", measure['kcals'], measure['measure'])
+    rec[:measures].each do |measure|
+      puts sprintf(" %5i kcals per %s", measure[:kcals], measure[:measure])
     end
 
-    if rec['refuse_percentage'] > 0
-      puts sprintf("Refuse %i%% - %s", rec['refuse_percentage'], rec['refuse_description'])
+    if rec[:refuse_percentage] > 0
+      puts sprintf("Refuse %i%% - %s", rec[:refuse_percentage], rec[:refuse_description])
     end
   end
 end
@@ -107,7 +122,7 @@ foods.each do |record|
   add_measures(conn, record)
 end
 
-list = foods.sort_by { |a| [ a['food_group'].downcase, a['description'].downcase ]}
+list = foods.sort_by { |a| [ a[:food_group].downcase, a[:description].downcase ]}
 
 # For a text report:
 
