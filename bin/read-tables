@@ -81,7 +81,7 @@ drop index if exists id_idx;
 drop index if exists sequence_idx;
 
 create table WEIGHT(
-   id char(5) not null,
+   id char(5) not null references food_description(id),
    sequence char(2) not null,
    amount float not null,
    description varchar(84) not null,
@@ -132,8 +132,8 @@ drop index if exists food_id_idx;
 drop index if exists nutrient_id_idx;
 
 create table NUTRIENT_DATA(
-   food_id char(5) not null,
-   nutrient_id char(3) not null,
+   food_id char(5) not null references food_description(id),
+   nutrient_id char(3) not null references nutrient_definition(id),
    nutrient_value float not null,
    data_points float not null,
    std_error float default null,
@@ -208,7 +208,7 @@ def write_food_group_table()
   puts <<SQL
 drop table if exists FOOD_GROUP;
 create table FOOD_GROUP(
-   id char(5) not null,
+   id char(4) not null,
    description varchar(60) not null,
    primary key(id)
 );
@@ -241,7 +241,7 @@ def write_food_description_table()
 drop table if exists FOOD_DESCRIPTION;
 create table FOOD_DESCRIPTION(
     id char(5) not null,
-    food_group_id char(4) not null,
+    food_group_id char(4) not null references food_group(id),
     description varchar(200) not null,
     short_description varchar(60) not null,
     common_name varchar(100) default null,
@@ -306,9 +306,9 @@ end
 
 # main()
 
+write_food_group_table()
 write_food_description_table()
+write_nutrient_definition_table()
 write_nutrient_data_table()
 write_weight_table()
-write_food_group_table()
-write_nutrient_definition_table()
 write_foods_view()
