@@ -17,7 +17,7 @@ def search_terms(*words)
   return 'description ILIKE ' + terms.join(' AND description ILIKE ')
 end
 
-# not yet working
+# not yet working, an alternative regexp version of the above (mire usable for a prepared statement)
 # def search_terms2(*words)
 #   terms = words.map{ |w| '(?:' + w.sub(/[^a-z]/i, '') + ')'}.join
 # end
@@ -93,21 +93,18 @@ rescue PG::Error => e
   exit -1
 end
 
+
 def summary_report(list)
   group = ''
-
   list.each do |rec|
     if rec[:food_group] != group
       group = rec[:food_group]
       puts '', group, group.gsub(/./, '*')
     end
-
     puts '', rec[:description]
-
     rec[:measures].each do |measure|
       puts sprintf(" %5i kcals per %s", measure[:kcals], measure[:measure])
     end
-
     if rec[:refuse_percentage] > 0
       puts sprintf("Refuse %i%% - %s", rec[:refuse_percentage], rec[:refuse_description])
     end
