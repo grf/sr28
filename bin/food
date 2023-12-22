@@ -3,6 +3,50 @@
 require 'pg'
 require 'json'
 
+
+class Nutrients
+
+  # select distinct id, units, description, decimal_places from nutrient_definition;
+  # TODO: add selection iof vitamins (A, D, C) Calcium, Potassium, Iron, poly- and mono- saturated fats
+
+  #  id  | units |         description          | decimal_places
+  # -----+-------+------------------------------+----------------
+  #  205 | g     | Carbohydrate, by difference  | 2
+  #  601 | mg    | Cholesterol                  | 0
+  #  208 | kcal  | Energy                       | 0
+  #  606 | g     | Fatty acids, total saturated | 3
+  #  605 | g     | Fatty acids, total trans     | 3
+  #  291 | g     | Fiber, total dietary         | 1
+  #  203 | g     | Protein                      | 2
+  #  307 | mg    | Sodium, Na                   | 0
+  #  269 | g     | Sugars, total                | 2
+  #  204 | g     | Total lipid (fat)            | 2
+
+  NUTRIENT_CODES = {
+
+    '208' => { id: '208', units: :kcal, name: 'Energy', decimal_places: 0 },
+
+    '205' => { id: '205', units: :g,  decimal_places: 2, name: 'Total Carbohydrate'},
+    '291' => { id: '291', units: :g,  decimal_places: 1, name: 'Dietary Fiber' },
+    '269' => { id: '269', units: :g,  decimal_places: 2, name: 'Sugars' },
+
+    '203' => { id: '203', units: :g,  decimal_places: 2, name: 'Protein' },
+
+    '606' => { id: '606', units: :g,  decimal_places: 3, name: 'Total Fat' },
+    '605' => { id: '605', units: :g,  decimal_places: 3, name: 'Trans Fat' },
+
+    '601' => { id: '601', units: :mg, decimal_places: 0, name: 'Cholesterol' },
+    '307' => { id: '307', units: :mg, decimal_places: 0, name: 'Sodium' },
+  }
+
+  def initialize(food_id)
+    @food_id = food_id
+  end
+
+end
+
+
+
 DATABASE_NAME = 'food' # the postgresql database name you've created
 
 Kernel.trap('PIPE') { exit }
@@ -17,7 +61,7 @@ def search_terms(*words)
   return 'description ILIKE ' + terms.join(' AND description ILIKE ')
 end
 
-# not yet working, an alternative regexp version of the above (mire usable for a prepared statement)
+# not yet working, an alternative regexp version of the above (more usable for a prepared statement)
 # def search_terms2(*words)
 #   terms = words.map{ |w| '(?:' + w.sub(/[^a-z]/i, '') + ')'}.join
 # end
@@ -32,13 +76,14 @@ end
 # where a record is a hash', e.g.:
 #   "id": "16359",
 #   "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, canned, drained, rinsed in tap water",
-#   "kcal": 138,
 #   "food_group": "Legumes and Legume Products",
 #   "refuse_percentage": 0,
 #   "refuse_description": null
+#
 
-def get_foods(connection)
-  search_clause = search_terms(*ARGV)
+
+def get_foods(connection, args)
+  search_clause = search_terms(*args)
   usage() unless search_clause
   list = []
 
@@ -46,7 +91,7 @@ def get_foods(connection)
   results.each do |result|
     rec = {
       id:                 result['id'],
-      kcal:               result['kcal'].to_i,
+      kcal:               result['kcal'].to_f,
       refuse_percentage:  result['refuse_percentage'].to_i,
       refuse_description: "#{result['refuse_description']}".strip,
       description:        result['description'],
@@ -66,15 +111,17 @@ end
 def add_measures(connection, food_record)
   results = connection.exec_prepared('measure_select', [ food_record[:id] ])
 
-  kcals_per_100_grams = food_record[:kcal].to_f
-  list = [ { measure: '100 grams', kcals: kcals_per_100_grams.round,  grams: 100 } ]
+  kcals_per_100_grams = food_record[:kcal]
+  list = [ { measure: '100 grams', kcals: kcals_per_100_grams,  grams: 100 } ]
 
-  # example record: { "amount": "1", "description": "cup", "grams": "185" }
+  # example result: { "amount" => "1", "description" => "serving 1/2 cup", "grams" => "4.3" }
+
   results.each do |result|
     amount, description, grams = result.fetch_values('amount', 'description', 'grams')
+    grams = grams.to_f
     text = "#{amount} #{description}".strip
-    total_kcals = kcals_per_100_grams * grams.to_f / 100
-    list.push( { measure: text.strip, kcals: total_kcals.round, grams: grams.to_f.round })
+    total_kcals = kcals_per_100_grams * grams / 100
+    list.push( { measure: text.strip, kcals: total_kcals, grams: grams })
   end
   food_record[:measures] = list
 rescue PG::Error => e
@@ -84,6 +131,7 @@ end
 
 
 def get_connection(database_name)
+   connection = PG::Connection.open("127.0.0.1", 5432, "", "", "food")
   connection = PG::Connection.open(:dbname => database_name)
   connection.prepare('measure_select', 'SELECT amount, description, grams FROM weight WHERE id = $1 ORDER BY sequence')
   ## not yet working: connection.prepare('regexp_food_select', 'SELECT * FROM foods WHERE description ~* $1')
@@ -103,7 +151,7 @@ def summary_report(list)
     end
     puts '', rec[:description]
     rec[:measures].each do |measure|
-      puts sprintf(" %5i kcals per %s", measure[:kcals], measure[:measure])
+      puts sprintf(" %5i kcals per %s",  measure[:kcals].round, measure[:measure])
     end
     if rec[:refuse_percentage] > 0
       puts sprintf("Refuse %i%% - %s", rec[:refuse_percentage], rec[:refuse_description])
@@ -114,7 +162,7 @@ end
 # main()
 
 conn = get_connection(DATABASE_NAME)
-foods = get_foods(conn)
+foods = get_foods(conn, ARGV)
 foods.each do |record|
   add_measures(conn, record)
 end

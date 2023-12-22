@@ -1,6 +1,6 @@
 Some of the data input files had strange text encodings that has to be corrected one way or another:
 
-    FOOD_DES.txt: text/plain; charset=unknown-8bit  - odd \2xx characrters, just removed them
+    FOOD_DES.txt: text/plain; charset=unknown-8bit  - odd \22x characrters, just removed
     FOOTNOTE.txt: text/plain; charset=unknown-8bit  - don't care, current;y unused
     NUTR_DEF.txt: text/plain; charset=iso-8859-1    - converted to utf-8 before ingest
     WEIGHT.txt:   text/plain; charset=iso-8859-1    - one french-style entree, renamed
