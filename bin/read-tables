@@ -35,18 +35,22 @@ def read_data(filename)
   count = 0
   fd = File.open(filename)
   while not fd.eof?
-    line = fd.readline
-    line.chomp!
-    count += 1
-    fields = []
-    line.split('^').each do |f|
-      datum = f.gsub('~~','').gsub(/^~/,'').gsub(/~$/,'')
-      fields.push(datum.empty? ? nil : datum)
+    begin
+      line = fd.readline
+      line.chomp!
+      count += 1
+      fields = []
+      line.split('^').each do |f|
+        datum = f.gsub('~~','').gsub(/^~/,'').gsub(/~$/,'')
+        fields.push(datum.empty? ? nil : datum)
+      end
+      yield fields
+    rescue => e
+      STDERR.puts "error '#{e}' file '#{filename}' line #{count}"
     end
-    yield fields
   end
 rescue => e
-  STDERR.puts "error '#{e}' file '#{filename}' line #{count}"
+  STDERR.puts "error '#{e}' file '#{filename}'"
   exit
 ensure
   fd.close

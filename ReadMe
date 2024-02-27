@@ -4,3 +4,5 @@ Some of the data input files had strange text encodings that has to be corrected
     FOOTNOTE.txt: text/plain; charset=unknown-8bit  - don't care, current;y unused
     NUTR_DEF.txt: text/plain; charset=iso-8859-1    - converted to utf-8 before ingest
     WEIGHT.txt:   text/plain; charset=iso-8859-1    - one french-style entree, renamed
+
+e.g.  iconv -f ISO-8859-2 -t UTF8 NUTR_DEF.txt
