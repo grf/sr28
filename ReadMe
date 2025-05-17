@@ -6,3 +6,7 @@ Some of the data input files had strange text encodings that has to be corrected
     WEIGHT.txt:   text/plain; charset=iso-8859-1    - one french-style entree, renamed
 
 e.g.  iconv -f ISO-8859-2 -t UTF8 NUTR_DEF.txt
+
+TODO: see data/grocery-list for a list of the 500 or so foods
+I've bought in the last few years. I want to get a CSV of these data
+to create a web app to streamline calorie use.
