@@ -3,6 +3,7 @@
 require 'pg'
 require 'json'
 
+DEBUG = false
 
 class Nutrients
 
@@ -81,34 +82,81 @@ end
 #   "refuse_description": null
 #
 
+# All the food groups:
+#
+# American Indian/Alaska Native Foods
+# Baked Products
+# Beef Products
+# Beverages
+# Breakfast Cereals
+# Cereal Grains and Pasta
+# Dairy and Egg Products
+# Fats and Oils
+# Finfish and Shellfish Products
+# Fruits and Fruit Juices
+# Lamb, Veal, and Game Products
+# Legumes and Legume Products
+# Nut and Seed Products
+# Pork Products
+# Poultry Products
+# Sausages and Luncheon Meats
+# Snacks
+# Soups, Sauces, and Gravies
+# Spices and Herbs
+# Sweets
+# Vegetables and Vegetable Products
+
+
+# FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Breakfast Cereals', 'Snacks', 'Sweets' ]
+# FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Snacks', 'Sweets' ]
+FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Snacks' ]
 
 def get_foods(connection, args)
   search_clause = search_terms(*args)
   usage() unless search_clause
   list = []
-
+  STDERR.puts "SELECT * FROM foods WHERE #{search_clause}" if DEBUG
   results = connection.exec("SELECT * FROM foods WHERE #{search_clause}")
   results.each do |result|
     rec = {
       id:                 result['id'],
-      kcal:               result['kcal'].to_f,
+      kcal:               result['kcal'].to_f,                  # per 100 grams
       refuse_percentage:  result['refuse_percentage'].to_i,
       refuse_description: "#{result['refuse_description']}".strip,
       description:        result['description'],
       food_group:         result['food_group']
     }
+    next if FOOD_GROUP_STOPLIST.include? rec[:food_group]
+
     list.push rec
   end
+  STDERR.puts list.inspect if DEBUG
   return list
 rescue PG::Error => e
   STDERR.puts e
   exit -1
 end
 
-# add_measured()
+
+# Return grams of protein if avaialble
+
+def add_protein(connection, food_record)
+  STDERR.puts "SELECT nutrient_value FROM nutrient_data WHERE food_id = '#{food_record[:id]}' AND nutrient_id = '203'" if DEBUG
+  results = connection.exec_prepared('protein_select', [ food_record[:id] ])
+  grams = nil
+  if results.count == 1
+    grams = results[0]['nutrient_value'].to_f   # grams protein per 100 grams of food
+  end
+  food_record[:protein] = grams
+end
+
+
+# add_measures()
 # augment a food record with additional measurement information
 
 def add_measures(connection, food_record)
+
+  STDERR.puts "SELECT amount, description, grams FROM weight WHERE id = #{food_record[:id]} ORDER BY sequence" if DEBUG
   results = connection.exec_prepared('measure_select', [ food_record[:id] ])
 
   kcals_per_100_grams = food_record[:kcal]
@@ -131,9 +179,10 @@ end
 
 
 def get_connection(database_name)
-   connection = PG::Connection.open("127.0.0.1", 5432, "", "", "food")
+  # connection = PG::Connection.open("127.0.0.1", 5432, "", "", "food")
   connection = PG::Connection.open(:dbname => database_name)
   connection.prepare('measure_select', 'SELECT amount, description, grams FROM weight WHERE id = $1 ORDER BY sequence')
+  connection.prepare('protein_select', 'SELECT nutrient_value FROM nutrient_data WHERE food_id = $1 AND nutrient_id = \'203\'');
   ## not yet working: connection.prepare('regexp_food_select', 'SELECT * FROM foods WHERE description ~* $1')
   return connection
 rescue PG::Error => e
@@ -149,7 +198,12 @@ def summary_report(list)
       group = rec[:food_group]
       puts '', group, group.gsub(/./, '*')
     end
-    puts '', rec[:description]
+    puts '', sprintf("%s (%s)", rec[:description], rec[:id])
+    if rec[:protein]
+      (rec[:protein] / 100).round
+      # puts sprintf(" %5i percent protein",  rec[:protein])
+      puts sprintf(" %5.2f grams protein per 100 grams food",  rec[:protein])
+    end
     rec[:measures].each do |measure|
       puts sprintf(" %5i kcals per %s",  measure[:kcals].round, measure[:measure])
     end
@@ -165,6 +219,8 @@ conn = get_connection(DATABASE_NAME)
 foods = get_foods(conn, ARGV)
 foods.each do |record|
   add_measures(conn, record)
+  add_protein(conn, record)
+  STDERR.puts '', record.inspect, '' if DEBUG
 end
 
 list = foods.sort_by { |a| [ a[:food_group].downcase, a[:description].downcase ]}
