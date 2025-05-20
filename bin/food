@@ -5,6 +5,8 @@ require 'json'
 
 DEBUG = false
 
+# not using this yet....
+
 class Nutrients
 
   # select distinct id, units, description, decimal_places from nutrient_definition;
@@ -109,13 +111,14 @@ end
 
 # FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Breakfast Cereals', 'Snacks', 'Sweets' ]
 # FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Snacks', 'Sweets' ]
-FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Snacks' ]
+FOOD_GROUP_STOPLIST = [ 'American Indian/Alaska Native Foods', 'Snacks', 'Sausages and Luncheon Meats', 'Breakfast Cereals' ]
 
 def get_foods(connection, args)
   search_clause = search_terms(*args)
   usage() unless search_clause
   list = []
   STDERR.puts "SELECT * FROM foods WHERE #{search_clause}" if DEBUG
+  ## TODO: bad SQL injection
   results = connection.exec("SELECT * FROM foods WHERE #{search_clause}")
   results.each do |result|
     rec = {
@@ -132,6 +135,28 @@ def get_foods(connection, args)
   end
   STDERR.puts list.inspect if DEBUG
   return list
+rescue PG::Error => e
+  STDERR.puts e
+  exit -1
+end
+
+def get_food_by_id(connection, id) # id is a string of numeric digits, we should get at most one food
+  list = []
+  STDERR.puts "SELECT * FROM foods WHERE #{}" if DEBUG
+  results = connection.exec_prepared('food_id_select', [ id ])
+  results.each do |result|
+    rec = {
+      id:                 result['id'],
+      kcal:               result['kcal'].to_f,                  # per 100 grams
+      refuse_percentage:  result['refuse_percentage'].to_i,
+      refuse_description: "#{result['refuse_description']}".strip,
+      description:        result['description'],
+      food_group:         result['food_group']
+    }
+    list.push rec
+  end
+  STDERR.puts list.inspect if DEBUG
+  return list.shift
 rescue PG::Error => e
   STDERR.puts e
   exit -1
@@ -182,6 +207,7 @@ def get_connection(database_name)
   # connection = PG::Connection.open("127.0.0.1", 5432, "", "", "food")
   connection = PG::Connection.open(:dbname => database_name)
   connection.prepare('measure_select', 'SELECT amount, description, grams FROM weight WHERE id = $1 ORDER BY sequence')
+  connection.prepare('food_id_select', 'SELECT * FROM foods WHERE id = $1')
   connection.prepare('protein_select', 'SELECT nutrient_value FROM nutrient_data WHERE food_id = $1 AND nutrient_id = \'203\'');
   ## not yet working: connection.prepare('regexp_food_select', 'SELECT * FROM foods WHERE description ~* $1')
   return connection
@@ -202,7 +228,8 @@ def summary_report(list)
     if rec[:protein]
       (rec[:protein] / 100).round
       # puts sprintf(" %5i percent protein",  rec[:protein])
-      puts sprintf(" %5.2f grams protein per 100 grams food",  rec[:protein])
+      puts sprintf(" %5.2f grams protein/kcal",  rec[:protein]/rec[:kcal])
+      puts sprintf(" %5.2f grams protein per 100 grams",  rec[:protein])
     end
     rec[:measures].each do |measure|
       puts sprintf(" %5i kcals per %s",  measure[:kcals].round, measure[:measure])
@@ -214,6 +241,25 @@ def summary_report(list)
 end
 
 # main()
+
+
+# testing new get_food_by_id():
+
+if false
+  conn = get_connection(DATABASE_NAME)
+  id = ARGV[0]
+  record = get_food_by_id(conn, id)
+  if record.nil?
+    STDERR.puts "No record for id '#{id}'"
+  else
+    add_measures(conn, record)
+    add_protein(conn, record)
+    STDERR.puts '', record.inspect, ''
+  end
+  exit
+end
+
+
 
 conn = get_connection(DATABASE_NAME)
 foods = get_foods(conn, ARGV)
